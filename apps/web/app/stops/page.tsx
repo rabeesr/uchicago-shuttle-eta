@@ -1,22 +1,23 @@
+import { auth } from "@clerk/nextjs/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import StopsBrowser, { type BrowseStop } from "@/components/StopsBrowser";
+import StopsBrowser, {
+  type BrowseStop,
+  type RouteChip,
+} from "@/components/StopsBrowser";
 
 export const dynamic = "force-dynamic";
 
 export default async function StopsPage() {
+  const { userId } = await auth();
   const supabase = await getSupabaseServer();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
   const [{ data: stops }, { data: routeStops }, { data: routes }, { data: favs }] =
     await Promise.all([
       supabase.from("stops").select("id, name"),
       supabase.from("route_stops").select("route_id, stop_id"),
       supabase.from("routes").select("id, name, color"),
-      user
-        ? supabase.from("user_favorite_stops").select("stop_id").eq("user_id", user.id)
+      userId
+        ? supabase.from("user_favorite_stops").select("stop_id")
         : Promise.resolve({ data: [] as { stop_id: string }[] }),
     ]);
 
@@ -30,12 +31,19 @@ export default async function StopsPage() {
     routesPerStop.set(rs.stop_id, list);
   }
 
+  // Only surface stops that belong to at least one known route — orphans
+  // from deleted CTA routes would otherwise clutter the list.
   const browseStops: BrowseStop[] = (stops ?? [])
+    .filter((s) => (routesPerStop.get(s.id) ?? []).length > 0)
     .map((s) => ({
       id: s.id,
       name: s.name,
       routes: routesPerStop.get(s.id) ?? [],
     }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const routeChips: RouteChip[] = (routes ?? [])
+    .map((r) => ({ id: r.id, name: r.name, color: r.color }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const initialFavorites = (favs ?? []).map((f) => f.stop_id);
@@ -44,15 +52,16 @@ export default async function StopsPage() {
     <main className="mx-auto max-w-3xl p-6">
       <h1 className="text-2xl font-bold">Browse stops</h1>
       <p className="mt-1 text-sm text-gray-500">
-        {user
-          ? "Favorite the stops you use. They'll show up on your home page with live countdowns."
-          : "Sign in to favorite stops and get live countdowns."}
+        {userId
+          ? "Filter by route to narrow down, then star the stops you use."
+          : "Sign in to favorite stops."}
       </p>
       <div className="mt-4">
         <StopsBrowser
           stops={browseStops}
+          routes={routeChips}
           initialFavorites={initialFavorites}
-          signedIn={!!user}
+          signedIn={!!userId}
         />
       </div>
     </main>

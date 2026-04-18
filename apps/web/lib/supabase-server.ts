@@ -1,27 +1,26 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { auth } from "@clerk/nextjs/server";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-type CookiePayload = { name: string; value: string; options?: CookieOptions };
+/**
+ * Supabase client for server components and route handlers. Uses the Clerk
+ * native integration: Supabase attaches the Clerk-issued session token to
+ * every request and enforces RLS via auth.jwt()->>'sub'.
+ *
+ * Must be created per-request — Clerk's auth() reads from request-scoped
+ * storage. Do not cache the client.
+ */
+export async function getSupabaseServer(): Promise<SupabaseClient> {
+  const { getToken } = await auth();
 
-export async function getSupabaseServer() {
-  const cookieStore = await cookies();
-  return createServerClient(
+  return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet: CookiePayload[]) {
-          try {
-            for (const { name, value, options } of cookiesToSet) {
-              cookieStore.set(name, value, options);
-            }
-          } catch {
-            // Server Components can't set cookies — middleware handles refresh.
-          }
-        },
+      accessToken: async () => (await getToken()) ?? null,
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
       },
     },
   );

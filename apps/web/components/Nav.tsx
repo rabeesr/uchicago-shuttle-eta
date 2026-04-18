@@ -1,12 +1,7 @@
 import Link from "next/link";
-import { getSupabaseServer } from "@/lib/supabase-server";
+import { Show, UserButton } from "@clerk/nextjs";
 
-export default async function Nav() {
-  const supabase = await getSupabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+export default function Nav() {
   return (
     <header className="border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-gray-950/80">
       <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
@@ -15,29 +10,26 @@ export default async function Nav() {
           Shuttle ETA
         </Link>
         <div className="flex items-center gap-4 text-sm">
+          <Link href="/routes" className="text-gray-700 hover:text-maroon dark:text-gray-300">
+            Routes
+          </Link>
           <Link href="/stops" className="text-gray-700 hover:text-maroon dark:text-gray-300">
             Stops
           </Link>
           <Link href="/map" className="text-gray-700 hover:text-maroon dark:text-gray-300">
             Map
           </Link>
-          {user ? (
-            <form action="/auth/signout" method="post">
-              <button
-                type="submit"
-                className="text-gray-500 hover:text-maroon dark:text-gray-400"
-              >
-                Sign out
-              </button>
-            </form>
-          ) : (
+          <Show when="signed-out">
             <Link
-              href="/auth"
+              href="/sign-in"
               className="rounded bg-maroon px-3 py-1.5 font-medium text-white hover:bg-maroon-700"
             >
               Sign in
             </Link>
-          )}
+          </Show>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
         </div>
       </nav>
     </header>

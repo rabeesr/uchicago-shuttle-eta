@@ -58,7 +58,13 @@ export interface Alert {
 }
 
 export interface UserFavoriteStop {
-  user_id: string;
+  user_id: string;     // Clerk user id (text)
   stop_id: string;
+  created_at: string;
+}
+
+export interface UserFavoriteRoute {
+  user_id: string;     // Clerk user id (text)
+  route_id: string;
   created_at: string;
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { useAuth } from "@clerk/nextjs";
+import { useSupabaseBrowser } from "@/lib/supabase-browser";
 
 export interface BrowseStop {
   id: string;
@@ -9,38 +10,54 @@ export interface BrowseStop {
   routes: Array<{ id: string; name: string; color: string | null }>;
 }
 
+export interface RouteChip {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 export default function StopsBrowser({
   stops,
+  routes,
   initialFavorites,
   signedIn,
 }: {
   stops: BrowseStop[];
+  routes: RouteChip[];
   initialFavorites: string[];
   signedIn: boolean;
 }) {
+  const supabase = useSupabaseBrowser();
+  const { userId } = useAuth();
   const [query, setQuery] = useState("");
+  const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(
     () => new Set(initialFavorites),
   );
   const [pending, setPending] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
+    let rows = stops;
+    if (routeFilter) {
+      rows = rows.filter((s) => s.routes.some((r) => r.id === routeFilter));
+    }
     const q = query.trim().toLowerCase();
-    if (!q) return stops;
-    return stops.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.routes.some((r) => r.name.toLowerCase().includes(q)),
-    );
-  }, [stops, query]);
+    if (q) {
+      rows = rows.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          s.routes.some((r) => r.name.toLowerCase().includes(q)),
+      );
+    }
+    return rows;
+  }, [stops, query, routeFilter]);
 
   async function toggle(stopId: string) {
-    if (!signedIn) {
-      window.location.href = `/auth?next=/stops`;
+    if (!signedIn || !userId) {
+      window.location.href = `/sign-in?redirect_url=/stops`;
       return;
     }
     const wasFav = favorites.has(stopId);
-    // Optimistic update.
     setFavorites((prev) => {
       const next = new Set(prev);
       if (wasFav) next.delete(stopId);
@@ -49,7 +66,6 @@ export default function StopsBrowser({
     });
     setPending((prev) => new Set(prev).add(stopId));
 
-    const supabase = getSupabaseBrowser();
     if (wasFav) {
       const { error } = await supabase
         .from("user_favorite_stops")
@@ -59,9 +75,6 @@ export default function StopsBrowser({
         setFavorites((prev) => new Set(prev).add(stopId));
       }
     } else {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) return;
       const { error } = await supabase
         .from("user_favorite_stops")
         .insert({ user_id: userId, stop_id: stopId });
@@ -89,6 +102,38 @@ export default function StopsBrowser({
         placeholder="Search stops or routes..."
         className="block w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon dark:border-gray-700 dark:bg-gray-900"
       />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setRouteFilter(null)}
+          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+            routeFilter === null
+              ? "border-maroon bg-maroon text-white"
+              : "border-gray-300 text-gray-700 hover:border-maroon hover:text-maroon dark:border-gray-700 dark:text-gray-300"
+          }`}
+        >
+          All routes
+        </button>
+        {routes.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => setRouteFilter(r.id === routeFilter ? null : r.id)}
+            className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+              routeFilter === r.id
+                ? "text-white"
+                : "border border-gray-300 text-gray-700 hover:text-maroon dark:border-gray-700 dark:text-gray-300"
+            }`}
+            style={
+              routeFilter === r.id
+                ? { backgroundColor: r.color ?? "#666", borderColor: r.color ?? "#666" }
+                : undefined
+            }
+          >
+            {r.name}
+          </button>
+        ))}
+      </div>
       <ul className="mt-4 divide-y divide-gray-200 dark:divide-gray-800">
         {filtered.map((s) => {
           const isFav = favorites.has(s.id);

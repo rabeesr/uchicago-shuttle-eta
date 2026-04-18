@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { useSupabaseBrowser } from "@/lib/supabase-browser";
 import { formatCountdown, etaDisagreement } from "@/lib/format";
 
 export interface InitialEta {
@@ -35,7 +35,7 @@ function secondsFromNow(iso: string): number {
 }
 
 export default function Dashboard({ initial }: { initial: InitialEta[] }) {
-  const supabase = useMemo(() => getSupabaseBrowser(), []);
+  const supabase = useSupabaseBrowser();
   const [rows, setRows] = useState<EtaByKey>(() =>
     Object.fromEntries(initial.map((r) => [makeKey(r), r])),
   );

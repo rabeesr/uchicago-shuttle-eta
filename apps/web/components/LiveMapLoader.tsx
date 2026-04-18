@@ -15,6 +15,7 @@ const LiveMap = dynamic(() => import("./LiveMap"), {
 export default function LiveMapLoader(props: {
   initialVehicles: VehicleRow[];
   routes: RoutePolyline[];
+  favoriteRouteIds: string[];
 }) {
   return <LiveMap {...props} />;
 }
