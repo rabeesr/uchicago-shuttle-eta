@@ -1,14 +1,10 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
-// Routes that require the user to be signed in. Everything else is public
-// (including the landing page, which shows a CTA when signed out).
-const isProtected = createRouteMatcher(["/stops(.*)", "/map(.*)"]);
-
-export default clerkMiddleware(async (auth, req) => {
-  if (isProtected(req)) {
-    await auth.protect();
-  }
-});
+// Every route is public by default — signed-out visitors can browse the app
+// (stops, routes, map) without an account. The favorite toggles and the
+// home dashboard require auth, which is enforced at the data layer via RLS
+// plus client-side Clerk context.
+export default clerkMiddleware();
 
 export const config = {
   matcher: [
