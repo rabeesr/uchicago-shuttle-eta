@@ -135,17 +135,38 @@ export function getAlerts() {
 }
 
 // --- Native ETA (Passio's own prediction) ---
-// GET https://passiogo.com/mapGetData.php?eta=2&routeId=<id>&stopIds=<csv>&routeIds=<csv>
+// Verified shape (eta=3):
+//   {
+//     "ETAs": {
+//       "<stopId>": [
+//         {
+//           "secondsSpent": <seconds-until-arrival> | 86400 (no bus),
+//           "eta": "<display string>",
+//           "routeId": "<id>",
+//           "busName": "<bus id>",
+//           "outOfService": boolean,
+//           "eta_note": "solid" | "got from schedule" | ...
+//         },
+//         ...one entry per approaching bus
+//       ]
+//     }
+//   }
 export interface NativeEtaEntry {
-  stopId: string | number;
-  routeId: string | number;
-  eta?: number;       // minutes? seconds? Needs verification against live data.
-  etaText?: string;
+  secondsSpent: number;
+  eta: string;
+  routeId: string;
+  busName: string;
+  outOfService: boolean;
+  eta_note?: string;
+}
+
+export interface NativeEtaResponse {
+  ETAs: Record<string, NativeEtaEntry[]>;
 }
 
 export function getNativeEta(routeId: string, stopIds: string[]) {
   const csv = stopIds.join(",");
-  return get<Record<string, unknown>>(
-    `/mapGetData.php?eta=2&routeId=${encodeURIComponent(routeId)}&stopIds=${encodeURIComponent(csv)}&routeIds=${encodeURIComponent(routeId)}`,
+  return get<NativeEtaResponse>(
+    `/mapGetData.php?eta=3&deviceId=0&routeId=${encodeURIComponent(routeId)}&routeIds=${encodeURIComponent(routeId)}&stopIds=${encodeURIComponent(csv)}`,
   );
 }

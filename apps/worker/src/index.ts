@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { log } from "./log.js";
 import { scheduleDailySync } from "./jobs/dailySync.js";
 import { scheduleLiveIngest } from "./jobs/liveIngest.js";
+import { scheduleNativeEta } from "./jobs/nativeEta.js";
 
 const healthServer = http.createServer((req, res) => {
   if (req.url === "/healthz") {
@@ -22,8 +23,7 @@ log.info("worker bootstrapping", { systemId: config.systemId });
 
 scheduleDailySync();
 scheduleLiveIngest();
-
-// nativeEta wired in a follow-up commit.
+scheduleNativeEta();
 
 process.on("SIGTERM", () => {
   log.info("SIGTERM received, shutting down");
