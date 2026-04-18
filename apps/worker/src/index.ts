@@ -1,6 +1,7 @@
 import http from "node:http";
 import { config } from "./config.js";
 import { log } from "./log.js";
+import { scheduleDailySync } from "./jobs/dailySync.js";
 
 const healthServer = http.createServer((req, res) => {
   if (req.url === "/healthz") {
@@ -18,11 +19,9 @@ healthServer.listen(config.healthPort, () => {
 
 log.info("worker bootstrapping", { systemId: config.systemId });
 
-// Jobs are wired in later commits:
-// - dailySync  (routes, stops, route_stops)
-// - liveIngest (WS primary, REST fallback)
-// - etaTick    (polyline projection → stop_etas)
-// - nativeEta  (Passio ETA for favorited stops)
+scheduleDailySync();
+
+// liveIngest, etaTick, nativeEta are wired in follow-up commits.
 
 process.on("SIGTERM", () => {
   log.info("SIGTERM received, shutting down");
