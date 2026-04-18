@@ -178,6 +178,13 @@ export async function runDailySync() {
     routeStops: routeStopRows.length,
     routesWithoutPolyline: skippedNoPolyline,
   });
+
+  // Refresh the in-memory caches that liveIngest + etaTick read from, so
+  // schema changes become visible without waiting for a worker restart.
+  // Lazy-imported to avoid a cycle.
+  const { reloadPolylines } = await import("./liveIngest.js");
+  const { reloadRouteStops } = await import("./etaTick.js");
+  await Promise.all([reloadPolylines(), reloadRouteStops()]);
 }
 
 // Runs once on startup, then every 24h. Railway will also restart daily
