@@ -14,7 +14,7 @@ Transparent ETAs for UChicago campus shuttles. Replaces the opaque native ETA in
 
 The worker polls PassioGo's live bus-position endpoint every 5 seconds (UChicago is system `1068`), projects each bus onto its route polyline to get along-route arc distance, maintains a per-bus EWMA of along-route speed, and computes an ETA to each upcoming stop. Passio's own ETA is also polled for stops at least one user has favorited, and both numbers land in the same `stop_etas` row so the UI can show the disagreement.
 
-The frontend is a Next.js app on Vercel. Users sign in via Supabase Auth (magic link), favorite stops from a browsable list, and see live countdowns on the home page that tick down every second via Supabase Realtime — no refresh. A secondary map tab shows bus markers moving in real time.
+The frontend is a Next.js app on Vercel. Users sign in via **Clerk** (native Supabase third-party auth integration — Clerk-issued session JWTs are attached to every Supabase request and Supabase validates them against Clerk's JWKS), favorite both **stops** and **routes**, filter the browse + map views by route, and see live countdowns that tick down every second via Supabase Realtime — no refresh.
 
 Full architecture lives in [`CLAUDE.md`](./CLAUDE.md).
 
@@ -55,28 +55,35 @@ railway.json        Railway build config pointing at apps/worker/Dockerfile
 
 ## Deploy
 
-### 1. Supabase
+### 1. Clerk + Supabase native integration
 
-- Create a new project.
-- Enable Realtime on the `public` schema (default).
-- Apply `supabase/migrations/0001_init.sql` via the Supabase MCP server, the SQL editor, or the Supabase CLI (`supabase db push`).
-- Copy the project URL, anon key, and service role key into your `.env.local` and into the Railway / Vercel dashboards below.
+- **Clerk dashboard** → Configure → Integrations → enable the **Supabase** integration. Copy the Publishable Key, Secret Key, and Frontend API URL.
+- **Supabase dashboard** → Authentication → Sign In / Up → Third-Party Auth → add **Clerk** and paste the Clerk Frontend API URL.
 
-### 2. Railway (worker)
+### 2. Supabase schema
+
+- Create the Supabase project.
+- Apply migrations in order via the Supabase MCP server, the SQL editor, or the Supabase CLI:
+  - `supabase/migrations/0001_init.sql`
+  - `supabase/migrations/0002_clerk_and_favorite_routes.sql`
+- Realtime is enabled on `vehicles`, `stop_etas`, `alerts`.
+- Copy the project URL, publishable/anon key, and service role key into `.env.local`.
+
+### 3. Railway (worker)
 
 - Connect the GitHub repo.
 - Railway picks up `railway.json` at the repo root, which builds `apps/worker/Dockerfile`.
 - Env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PASSIO_SYSTEM_ID=1068`, `USER_AGENT`, `WORKER_HEALTH_PORT=8080`.
 - Healthcheck path is `/healthz` — already configured.
 
-### 3. Vercel (web)
+### 4. Vercel (web)
 
 - Connect the GitHub repo.
 - **Set Root Directory to `apps/web`**.
 - Framework preset: Next.js (auto-detected).
 - Install command: `cd ../.. && pnpm install --frozen-lockfile`.
 - Build command: `cd ../.. && pnpm --filter @uchicago-shuttle/web... build`.
-- Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+- Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up`.
 
 ## Verification
 
