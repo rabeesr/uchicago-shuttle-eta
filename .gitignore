@@ -23,3 +23,7 @@ yarn-error.log*
 
 coverage/
 .pnpm-store/
+*.tsbuildinfo
+
+# Ignore any accidental nested clone of this same repo.
+/uchicago-shuttle-eta/
