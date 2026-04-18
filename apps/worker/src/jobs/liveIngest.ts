@@ -67,11 +67,14 @@ async function tick(): Promise<void> {
       for (const b of bucket as RawBus[]) {
         const busId = String(b.busId);
         const routeId = b.routeId ? String(b.routeId) : null;
+        // Skip CTA reference buses — we only track UChicago shuttles.
+        if (routeId && routeId.toLowerCase().startsWith("cta")) continue;
         const lat = Number(b.latitude);
         const lon = Number(b.longitude);
         const heading = Number(b.calculatedCourse);
 
         let arcM: number | null = null;
+        let routeTotalM = 0;
         if (routeId) {
           const segs = polyCache.get(routeId);
           if (segs && segs.length > 0) {
@@ -79,6 +82,7 @@ async function tick(): Promise<void> {
             if (best && best.projection.perpendicularM < 100) {
               arcM = best.projection.arcM;
             }
+            routeTotalM = segs[0].cumulative.at(-1) ?? 0;
           }
         }
 
@@ -106,6 +110,7 @@ async function tick(): Promise<void> {
               busId,
               routeId,
               busArcM: arcM,
+              routeTotalM,
               rollingSpeedMps: state.rollingSpeedMps,
               stopped: state.stoppedSince !== null,
             }),

@@ -98,8 +98,14 @@ export interface RawLatLng {
   lng: string;
 }
 
+// routes[routeId] = [name, color, [position, stopId, flag], ...ordered stops]
+export type RawRouteEntry = [string, string, ...Array<[string, string, number]>];
+
 export interface GetStopsResponse {
   stops: Record<string, RawStop | RawStop[]>;
+  // routes[routeId] is a tuple: [name, color, ...stopEntries].
+  routes: Record<string, RawRouteEntry>;
+  routeShortNames: Record<string, string>;
   // routePoints[routeId] is an array of segments; each segment is an array of {lat,lng}.
   routePoints: Record<string, RawLatLng[][] | RawLatLng[]>;
 }

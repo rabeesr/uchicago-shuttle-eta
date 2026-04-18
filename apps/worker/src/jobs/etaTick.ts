@@ -49,6 +49,8 @@ export interface BusSnapshot {
   busId: string;
   routeId: string;
   busArcM: number;
+  /** Total length of the bus's route polyline, used for loop-wrap math. */
+  routeTotalM: number;
   rollingSpeedMps: number;
   stopped: boolean;
 }
@@ -60,26 +62,37 @@ export async function emitEtasForBus(snap: BusSnapshot): Promise<void> {
     if (!stops || stops.length === 0) return;
 
     const speed = Math.max(snap.rollingSpeedMps, MIN_SPEED_FOR_ETA);
-    const routeLengthM = stops.at(-1)?.arc_distance_m ?? 0;
 
-    // Upcoming stops: those ahead on the polyline, or wrap around if past the end.
+    // Upcoming stops: those ahead on the polyline. If the bus is past every
+    // stop, wrap around using the true polyline length (passed in from
+    // liveIngest) — using max-stop-arc as the wrap length produces negative
+    // distances for routes whose polyline extends past the last stop (common
+    // for loop routes that end at a yard past the last passenger stop).
     const ahead = stops.filter((s) => s.arc_distance_m >= snap.busArcM);
     const candidates = ahead.length > 0
-      ? ahead
-      : stops.map((s) => ({ ...s, arc_distance_m: s.arc_distance_m + routeLengthM }));
+      ? ahead.map((s) => ({ stop_id: s.stop_id, distance: s.arc_distance_m - snap.busArcM }))
+      : snap.routeTotalM > 0
+        ? stops.map((s) => ({
+            stop_id: s.stop_id,
+            distance: s.arc_distance_m + snap.routeTotalM - snap.busArcM,
+          }))
+        : [];
 
-    const upcoming = candidates.slice(0, MAX_UPCOMING_STOPS);
+    // Safety net: drop any lingering non-positive entries so we never write
+    // a negative ETA.
+    const upcoming = candidates
+      .filter((c) => c.distance >= 0)
+      .slice(0, MAX_UPCOMING_STOPS);
     if (upcoming.length === 0) return;
 
     const nowIso = new Date().toISOString();
-    const rows = upcoming.map((s, idx) => {
-      const distance = s.arc_distance_m - snap.busArcM;
+    const rows = upcoming.map((c, idx) => {
       const eta = snap.stopped && idx === 0
         ? 0
-        : Math.round(distance / speed + idx * DWELL_PADDING_SEC);
+        : Math.max(0, Math.round(c.distance / speed + idx * DWELL_PADDING_SEC));
       return {
         route_id: snap.routeId,
-        stop_id: s.stop_id,
+        stop_id: c.stop_id,
         vehicle_id: snap.busId,
         our_eta_seconds: eta,
         passio_eta_seconds: null as number | null,

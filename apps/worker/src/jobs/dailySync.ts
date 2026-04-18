@@ -1,7 +1,6 @@
 import { db } from "../db.js";
 import { log } from "../log.js";
 import {
-  getRoutes,
   getStops,
   type RawStop,
   type RawLatLng,
@@ -12,14 +11,16 @@ import {
   type LatLon,
 } from "../eta/project.js";
 
-// Normalize Passio's routePoints shape (array of segments, each an array of
-// {lat, lng} strings) to a single longest polyline of [lat, lon] numbers.
-// We pick the longest segment because Passio sometimes returns duplicates
-// (outbound + inbound of the same loop).
+// The getStops endpoint is the canonical source of truth for this system:
+// it returns the complete routes catalog, short names, ordered stop lists,
+// and polylines in a single call. The separate getRoutes endpoint omits
+// polylines and sometimes disagrees on which routes are active, so we ignore
+// it here.
+
 function longestPolyline(
   raw: RawLatLng[][] | RawLatLng[] | undefined,
 ): LatLon[] {
-  if (!raw) return [];
+  if (!raw || raw.length === 0) return [];
   const segments: RawLatLng[][] = Array.isArray(raw[0])
     ? (raw as RawLatLng[][])
     : [raw as RawLatLng[]];
@@ -30,38 +31,28 @@ function longestPolyline(
   return best.map((p) => [Number(p.lat), Number(p.lng)] as LatLon);
 }
 
-// Collapse per-stop duplicates (one stop may appear once per route it belongs
-// to) and group by route so we can compute stop_order + arc_distance_m.
-interface StopsByRoute {
-  [routeId: string]: Array<{
-    stopId: string;
-    name: string;
-    lat: number;
-    lon: number;
-    radius: number | null;
-    position: number;
-  }>;
-}
-
-function groupStopsByRoute(raw: Record<string, RawStop | RawStop[]>): StopsByRoute {
-  const out: StopsByRoute = {};
+// Build a unique stopId -> stop lookup from the stops payload, which may have
+// the same stop repeated once per route it serves.
+function indexStopsById(raw: Record<string, RawStop | RawStop[]>): Map<
+  string,
+  { id: string; name: string; lat: number; lon: number; radius_m: number | null }
+> {
+  const out = new Map<
+    string,
+    { id: string; name: string; lat: number; lon: number; radius_m: number | null }
+  >();
   for (const entry of Object.values(raw)) {
     const items = Array.isArray(entry) ? entry : [entry];
     for (const s of items) {
-      const rid = s.routeId;
-      if (!out[rid]) out[rid] = [];
-      out[rid].push({
-        stopId: s.stopId,
+      if (out.has(s.stopId)) continue;
+      out.set(s.stopId, {
+        id: s.stopId,
         name: s.name,
         lat: Number(s.latitude),
         lon: Number(s.longitude),
-        radius: s.radius ?? null,
-        position: Number(s.position),
+        radius_m: s.radius ?? null,
       });
     }
-  }
-  for (const rid of Object.keys(out)) {
-    out[rid].sort((a, b) => a.position - b.position);
   }
   return out;
 }
@@ -69,27 +60,33 @@ function groupStopsByRoute(raw: Record<string, RawStop | RawStop[]>): StopsByRou
 export async function runDailySync() {
   log.info("dailySync: starting");
 
-  const [routesResp, stopsResp] = await Promise.all([getRoutes(), getStops()]);
+  const stopsResp = await getStops();
 
-  const routes = routesResp.all.filter((r) => !r.outdated);
-  const stopsByRoute = groupStopsByRoute(stopsResp.stops);
+  // Passio's UChicago account (system 1068) includes CTA routes as reference
+  // overlays. They have degenerate concatenated polylines that break our
+  // arc-projection math, and they're not what this app is for — skip them.
+  const routeEntries = Object.entries(stopsResp.routes).filter(
+    ([rid]) => !rid.toLowerCase().startsWith("cta"),
+  );
+  const stopsById = indexStopsById(stopsResp.stops);
 
   log.info("dailySync: fetched", {
-    routes: routes.length,
-    routesWithStops: Object.keys(stopsByRoute).length,
+    routes: routeEntries.length,
+    stops: stopsById.size,
     routePoints: Object.keys(stopsResp.routePoints).length,
   });
 
-  // Upsert routes with polyline + cumulative arc lengths.
-  const routeRows = routes.map((r) => {
-    const rid = String(r.myid);
+  // Routes: name + color + polyline + cumulative arc.
+  const routeRows = routeEntries.map(([rid, entry]) => {
+    const [name, color] = entry;
+    const shortName = stopsResp.routeShortNames[rid] ?? null;
     const polyline = longestPolyline(stopsResp.routePoints[rid]);
     const cumulative = cumulativeArcM(polyline);
     return {
       id: rid,
-      name: r.name,
-      short_name: r.shortName,
-      color: r.color,
+      name: name ?? rid,
+      short_name: shortName,
+      color: color ?? null,
       polyline,
       polyline_cumulative_m: cumulative,
       updated_at: new Date().toISOString(),
@@ -100,69 +97,85 @@ export async function runDailySync() {
     if (error) throw new Error(`routes upsert: ${error.message}`);
   }
 
-  // Stops: deduplicate by stopId (first occurrence wins).
-  const stopMap = new Map<
-    string,
-    { id: string; name: string; lat: number; lon: number; radius_m: number | null }
-  >();
-  for (const stops of Object.values(stopsByRoute)) {
-    for (const s of stops) {
-      if (!stopMap.has(s.stopId)) {
-        stopMap.set(s.stopId, {
-          id: s.stopId,
-          name: s.name,
-          lat: s.lat,
-          lon: s.lon,
-          radius_m: s.radius,
-        });
-      }
-    }
-  }
-  const stopRows = [...stopMap.values()];
+  // Stops (deduped by stopId).
+  const stopRows = [...stopsById.values()];
   {
     const { error } = await db.from("stops").upsert(stopRows, { onConflict: "id" });
     if (error) throw new Error(`stops upsert: ${error.message}`);
   }
 
-  // route_stops: for each route × its stops, project each stop onto the
-  // polyline to get arc_distance_m. Stop_order comes from Passio's `position`.
+  // route_stops: iterate each route's ordered stop list, resolve each stop's
+  // lat/lon from stopsById, project onto the route polyline for arc_distance_m.
   const routeStopRows: Array<{
     route_id: string;
     stop_id: string;
     stop_order: number;
     arc_distance_m: number;
   }> = [];
-  let skippedNoPolyline = 0;
-  for (const route of routes) {
-    const rid = String(route.myid);
-    const polyline = longestPolyline(stopsResp.routePoints[rid]);
-    const stops = stopsByRoute[rid] ?? [];
-    if (polyline.length < 2) {
-      // Fallback: stops themselves form the "polyline" (piecewise-linear
-      // between stops). arc_distance_m becomes cumulative stop-to-stop Haversine.
-      if (stops.length === 0) continue;
-      const stopPolyline: LatLon[] = stops.map((s) => [s.lat, s.lon]);
-      const cum = cumulativeArcM(stopPolyline);
-      stops.forEach((s, i) => {
+
+  let routesWithoutPolyline = 0;
+  let routesSkippedShape = 0;
+  let routesErrored = 0;
+  for (const [rid, entry] of routeEntries) {
+    try {
+      if (!Array.isArray(entry) || entry.length < 3) {
+        routesSkippedShape++;
+        continue;
+      }
+      const rawStopEntries = entry.slice(2);
+      const stopEntries = rawStopEntries.filter(
+        (e): e is [string, string, number] =>
+          Array.isArray(e) && e.length >= 2 && e[1] != null,
+      );
+      if (stopEntries.length === 0) continue;
+
+      const polyline = longestPolyline(stopsResp.routePoints[rid]);
+      const cum = polyline.length >= 2 ? cumulativeArcM(polyline) : null;
+
+      if (!cum) {
+        // Fallback: piecewise-linear between stops themselves.
+        routesWithoutPolyline++;
+        const resolved = stopEntries
+          .map((se) => ({ position: Number(se[0]), stop: stopsById.get(String(se[1])) }))
+          .filter((x) => x.stop)
+          .sort((a, b) => a.position - b.position);
+        if (resolved.length < 2) continue;
+        const poly: LatLon[] = resolved.map((r) => [r.stop!.lat, r.stop!.lon]);
+        const stopCum = cumulativeArcM(poly);
+        const seenFallback = new Set<string>();
+        resolved.forEach((r, i) => {
+          if (seenFallback.has(r.stop!.id)) return;
+          seenFallback.add(r.stop!.id);
+          routeStopRows.push({
+            route_id: rid,
+            stop_id: r.stop!.id,
+            stop_order: r.position,
+            arc_distance_m: stopCum[i],
+          });
+        });
+        continue;
+      }
+
+      // Deduplicate stopEntries on stopId (loop routes repeat the first stop at
+      // the end); keep the first occurrence to avoid PK conflict.
+      const seen = new Set<string>();
+      for (const [positionStr, stopId] of stopEntries) {
+        const sid = String(stopId);
+        if (seen.has(sid)) continue;
+        seen.add(sid);
+        const stop = stopsById.get(sid);
+        if (!stop) continue;
+        const p = projectOntoPolyline([stop.lat, stop.lon], polyline, cum);
         routeStopRows.push({
           route_id: rid,
-          stop_id: s.stopId,
-          stop_order: s.position,
-          arc_distance_m: cum[i],
+          stop_id: sid,
+          stop_order: Number(positionStr),
+          arc_distance_m: p.arcM,
         });
-      });
-      skippedNoPolyline++;
-      continue;
-    }
-    const cum = cumulativeArcM(polyline);
-    for (const s of stops) {
-      const p = projectOntoPolyline([s.lat, s.lon], polyline, cum);
-      routeStopRows.push({
-        route_id: rid,
-        stop_id: s.stopId,
-        stop_order: s.position,
-        arc_distance_m: p.arcM,
-      });
+      }
+    } catch (err) {
+      routesErrored++;
+      log.warn("dailySync: route failed", { rid, err: String(err) });
     }
   }
   {
@@ -176,20 +189,17 @@ export async function runDailySync() {
     routes: routeRows.length,
     stops: stopRows.length,
     routeStops: routeStopRows.length,
-    routesWithoutPolyline: skippedNoPolyline,
+    routesWithoutPolyline,
+    routesSkippedShape,
+    routesErrored,
   });
 
-  // Refresh the in-memory caches that liveIngest + etaTick read from, so
-  // schema changes become visible without waiting for a worker restart.
-  // Lazy-imported to avoid a cycle.
+  // Refresh liveIngest + etaTick caches so new data becomes visible in-process.
   const { reloadPolylines } = await import("./liveIngest.js");
   const { reloadRouteStops } = await import("./etaTick.js");
   await Promise.all([reloadPolylines(), reloadRouteStops()]);
 }
 
-// Runs once on startup, then every 24h. Railway will also restart daily
-// due to Nixpacks' default container recycle, so the 24h loop is belt +
-// suspenders.
 export function scheduleDailySync() {
   const DAY_MS = 24 * 60 * 60 * 1000;
   const tick = async () => {
@@ -199,6 +209,5 @@ export function scheduleDailySync() {
       log.error("dailySync failed", { err: String(err) });
     }
   };
-  void tick();
   setInterval(tick, DAY_MS).unref();
 }
