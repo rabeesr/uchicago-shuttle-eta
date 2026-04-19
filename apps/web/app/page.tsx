@@ -2,6 +2,7 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import Dashboard, { type InitialEta } from "@/components/Dashboard";
+import MiniMapLoader from "@/components/MiniMapLoader";
 
 export const dynamic = "force-dynamic";
 
@@ -10,22 +11,35 @@ export default async function Home() {
 
   if (!userId) {
     return (
-      <main className="mx-auto max-w-3xl p-8">
-        <h1 className="text-3xl font-bold text-maroon">UChicago Shuttle ETA</h1>
-        <p className="mt-2 text-gray-600 dark:text-gray-300">
-          Transparent ETAs for UChicago shuttles. We compute arrival times from
-          live bus positions so you don&apos;t have to trust Passio&apos;s
-          guess.
-        </p>
-        <p className="mt-4">
-          <Link
-            href="/sign-in"
-            className="inline-block rounded bg-maroon px-4 py-2 font-medium text-white hover:bg-maroon-700"
-          >
-            Sign in
-          </Link>{" "}
-          to favorite stops and routes and see live countdowns.
-        </p>
+      <main className="mx-auto max-w-6xl px-4 py-10">
+        <div className="rounded-2xl border border-gray-200 bg-white p-8">
+          <div className="flex items-center gap-2 text-xs font-medium text-accent">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+            live · 20 routes · 675 stops
+          </div>
+          <h1 className="mt-3 text-4xl font-bold tracking-tight">
+            UChicago shuttles,<br />with transparent ETAs.
+          </h1>
+          <p className="mt-3 max-w-xl text-gray-600">
+            Live bus positions from PassioGo, projected onto route polylines,
+            with a rolling-speed ETA — and Passio&apos;s own estimate shown
+            right next to it so you can see when we disagree.
+          </p>
+          <div className="mt-6 flex gap-3">
+            <Link
+              href="/sign-in"
+              className="rounded-lg bg-gray-900 px-6 py-2.5 font-medium text-white transition-colors hover:bg-gray-800"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/map"
+              className="rounded-lg border border-gray-200 bg-white px-6 py-2.5 font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              Peek at the map
+            </Link>
+          </div>
+        </div>
       </main>
     );
   }
@@ -43,15 +57,15 @@ export default async function Home() {
 
   if (stopIds.length === 0 && routeIds.length === 0) {
     return (
-      <main className="mx-auto max-w-5xl p-6">
+      <main className="mx-auto max-w-6xl px-4 py-6">
         <h1 className="text-2xl font-bold">Your shuttle</h1>
-        <p className="mt-2 text-gray-600 dark:text-gray-300">
+        <p className="mt-2 text-gray-600">
           Favorite{" "}
-          <Link href="/routes" className="text-maroon underline">
+          <Link href="/routes" className="font-medium text-accent underline">
             routes
           </Link>{" "}
           or{" "}
-          <Link href="/stops" className="text-maroon underline">
+          <Link href="/stops" className="font-medium text-accent underline">
             stops
           </Link>{" "}
           to see live countdowns here.
@@ -95,7 +109,7 @@ export default async function Home() {
   const favoriteStopSet = new Set(stopIds);
   const favoriteRouteSet = new Set(routeIds);
 
-  const allRows: (InitialEta & { _source: "stop" | "route" })[] = (
+  const allRows: InitialEta[] = (
     (etas ?? []) as unknown as JoinedRow[]
   ).map((r) => {
     const stop = pickOne(r.stops);
@@ -113,7 +127,7 @@ export default async function Home() {
       stop_name: stop?.name ?? "Unknown stop",
       route_name: route?.name ?? "Unknown route",
       route_color: route?.color ?? null,
-      _source: source,
+      source,
     };
   });
 
@@ -140,6 +154,7 @@ export default async function Home() {
         stop_name: stop?.name ?? "Unknown stop",
         route_name: "No live bus",
         route_color: null,
+        source: "stop" as const,
       };
     });
   const routeRowsWithLive = new Set(routeRows.map((r) => r.route_id));
@@ -157,13 +172,82 @@ export default async function Home() {
         stop_name: "(no stop — route not currently running)",
         route_name: route?.name ?? "Unknown route",
         route_color: route?.color ?? null,
+        source: "route" as const,
       };
     });
 
   const initial = [...stopRows, ...routeRows, ...stopPlaceholders, ...routePlaceholders];
 
+  // Load map data scoped to favorited routes for the dashboard mini-map.
+  const focusRouteIds = new Set<string>(routeIds);
+  // Also include routes that serve favorited stops.
+  if (stopIds.length > 0) {
+    const { data: stopRoutes } = await supabase
+      .from("route_stops")
+      .select("route_id")
+      .in("stop_id", stopIds);
+    for (const r of stopRoutes ?? []) focusRouteIds.add(r.route_id);
+  }
+  const focusRouteList = [...focusRouteIds];
+
+  type MiniMapData = {
+    vehicles: {
+      id: string;
+      route_id: string | null;
+      lat: number;
+      lon: number;
+      heading: number | null;
+      rolling_speed_mps: number | null;
+      updated_at: string;
+      out_of_service: boolean;
+    }[];
+    routes: { id: string; name: string; color: string | null; polyline: [number, number][] }[];
+    stops: { id: string; name: string; lat: number; lon: number; route_ids: string[] }[];
+  };
+
+  let miniMapData: MiniMapData | null = null;
+  if (focusRouteList.length > 0) {
+    const [{ data: mvehicles }, { data: mroutes }, { data: mrouteStops }, { data: mstops }] = await Promise.all([
+      supabase
+        .from("vehicles")
+        .select("id, route_id, lat, lon, heading, rolling_speed_mps, updated_at, out_of_service")
+        .in("route_id", focusRouteList),
+      supabase
+        .from("routes")
+        .select("id, name, color, polyline")
+        .in("id", focusRouteList),
+      supabase.from("route_stops").select("route_id, stop_id").in("route_id", focusRouteList),
+      supabase.from("stops").select("id, name, lat, lon"),
+    ]);
+    const stopIdSet = new Set((mrouteStops ?? []).map((rs) => rs.stop_id));
+    const routesByStop = new Map<string, string[]>();
+    for (const rs of mrouteStops ?? []) {
+      const list = routesByStop.get(rs.stop_id) ?? [];
+      list.push(rs.route_id);
+      routesByStop.set(rs.stop_id, list);
+    }
+    miniMapData = {
+      vehicles: (mvehicles ?? []).map((v) => ({ ...v })),
+      routes: (mroutes ?? []).map((r) => ({
+        id: r.id,
+        name: r.name,
+        color: r.color,
+        polyline: (r.polyline as [number, number][] | null) ?? [],
+      })),
+      stops: (mstops ?? [])
+        .filter((s) => stopIdSet.has(s.id))
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          lat: s.lat,
+          lon: s.lon,
+          route_ids: routesByStop.get(s.id) ?? [],
+        })),
+    };
+  }
+
   return (
-    <main className="mx-auto max-w-5xl p-6">
+    <main className="mx-auto max-w-6xl px-4 py-6">
       <h1 className="text-2xl font-bold">Your shuttle</h1>
       <p className="mt-1 text-sm text-gray-500">
         Live countdowns for your favorite stops and routes. Passio&apos;s own
@@ -173,6 +257,17 @@ export default async function Home() {
       <div className="mt-4">
         <Dashboard initial={initial} />
       </div>
+      {miniMapData && miniMapData.routes.length > 0 && (
+        <section className="mt-8">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold">Live map</h2>
+            <Link href="/map" className="text-sm text-accent hover:text-accent-hover">
+              Full map →
+            </Link>
+          </div>
+          <MiniMapLoader data={miniMapData} />
+        </section>
+      )}
     </main>
   );
 }

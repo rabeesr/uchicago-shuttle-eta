@@ -16,6 +16,8 @@ export interface InitialEta {
   stop_name: string;
   route_name: string;
   route_color: string | null;
+  // Which kind of favorite this card represents — governs the tap target.
+  source?: "stop" | "route";
 }
 
 interface EtaRow {
@@ -131,12 +133,16 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
 
   if (cards.length === 0) {
     return (
-      <div className="rounded border border-gray-200 bg-gray-50 p-6 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-        No favorite stops yet.{" "}
-        <a className="text-maroon underline" href="/stops">
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-600">
+        No favorites yet.{" "}
+        <a className="font-medium text-accent underline" href="/stops">
           Browse stops
         </a>{" "}
-        and star the ones you use.
+        or{" "}
+        <a className="font-medium text-accent underline" href="/routes">
+          routes
+        </a>{" "}
+        to pin what you use.
       </div>
     );
   }
@@ -151,21 +157,28 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
         const agreement = etaDisagreement(c.countdown, passioAdjusted);
         const agreementClass =
           agreement === "agree"
-            ? "text-green-600 dark:text-green-400"
+            ? "text-green-600"
             : agreement === "disagree-warn"
-              ? "text-amber-600 dark:text-amber-400"
+              ? "text-amber-600"
               : agreement === "disagree-strong"
-                ? "text-red-600 dark:text-red-400"
+                ? "text-red-600"
                 : "text-gray-500";
+        const href =
+          c.source === "route"
+            ? `/routes/${c.route_id}`
+            : c.stop_id && c.stop_id !== "-"
+              ? `/stops/${c.stop_id}`
+              : `/routes/${c.route_id}`;
         return (
-          <div
+          <a
             key={makeKey(c)}
-            className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+            href={href}
+            className="block rounded-2xl border border-gray-200 bg-white p-5 transition-colors hover:bg-gray-50"
           >
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold">{c.stop_name}</h3>
-                <div className="mt-1 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <div className="min-w-0">
+                <h3 className="truncate text-lg font-semibold">{c.stop_name}</h3>
+                <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
                   <span
                     className="inline-block h-2 w-2 rounded-full"
                     style={{ backgroundColor: c.route_color ?? "#666" }}
@@ -179,14 +192,14 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
                   {formatCountdown(c.countdown)}
                 </div>
                 <div className={`mt-1 text-xs tabular-nums ${agreementClass}`}>
-                  Passio says {formatCountdown(passioAdjusted)}
+                  Passio: {formatCountdown(passioAdjusted)}
                 </div>
               </div>
             </div>
             <div className="mt-3 text-[11px] text-gray-400">
-              updated {Math.max(0, Math.round(c.age))}s ago
+              updated {Math.max(0, Math.round(c.age))}s ago · tap for timetable
             </div>
-          </div>
+          </a>
         );
       })}
     </div>

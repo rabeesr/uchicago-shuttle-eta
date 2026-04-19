@@ -100,7 +100,7 @@ export default function StopsBrowser({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search stops or routes..."
-        className="block w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon dark:border-gray-700 dark:bg-gray-900"
+        className="block w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
       />
       <div className="mt-3 flex flex-wrap gap-2">
         <button
@@ -108,8 +108,8 @@ export default function StopsBrowser({
           onClick={() => setRouteFilter(null)}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
             routeFilter === null
-              ? "border-maroon bg-maroon text-white"
-              : "border-gray-300 text-gray-700 hover:border-maroon hover:text-maroon dark:border-gray-700 dark:text-gray-300"
+              ? "border-accent bg-accent text-white"
+              : "border-gray-300 text-gray-700 hover:border-accent hover:text-accent"
           }`}
         >
           All routes
@@ -122,7 +122,7 @@ export default function StopsBrowser({
             className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
               routeFilter === r.id
                 ? "text-white"
-                : "border border-gray-300 text-gray-700 hover:text-maroon dark:border-gray-700 dark:text-gray-300"
+                : "border border-gray-300 text-gray-700 hover:text-accent"
             }`}
             style={
               routeFilter === r.id
@@ -134,7 +134,7 @@ export default function StopsBrowser({
           </button>
         ))}
       </div>
-      <ul className="mt-4 divide-y divide-gray-200 dark:divide-gray-800">
+      <ul className="mt-4 divide-y divide-gray-200">
         {filtered.map((s) => {
           const isFav = favorites.has(s.id);
           const isPending = pending.has(s.id);
@@ -161,8 +161,8 @@ export default function StopsBrowser({
                 aria-pressed={isFav}
                 className={`ml-3 shrink-0 rounded px-3 py-1 text-sm font-medium transition ${
                   isFav
-                    ? "bg-maroon text-white hover:bg-maroon-700"
-                    : "border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+                    ? "bg-accent text-white hover:bg-accent-hover"
+                    : "border border-gray-300 text-gray-700 hover:bg-gray-50"
                 } ${isPending ? "opacity-60" : ""}`}
               >
                 {isFav ? "Favorited" : "Favorite"}

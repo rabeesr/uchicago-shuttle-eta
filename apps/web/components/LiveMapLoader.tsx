@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { VehicleRow, RoutePolyline } from "./LiveMap";
+import type { VehicleRow, RoutePolyline, StopMarker } from "./LiveMap";
 
 const LiveMap = dynamic(() => import("./LiveMap"), {
   ssr: false,
@@ -15,7 +15,15 @@ const LiveMap = dynamic(() => import("./LiveMap"), {
 export default function LiveMapLoader(props: {
   initialVehicles: VehicleRow[];
   routes: RoutePolyline[];
-  favoriteRouteIds: string[];
+  stops?: StopMarker[];
+  favoriteRouteIds?: string[];
+  showStops?: boolean;
+  showRouteFilterChips?: boolean;
+  focusCenter?: [number, number] | null;
+  focusZoom?: number | null;
+  routeLockIds?: string[] | null;
+  heightClass?: string;
+  stopsAreLinks?: boolean;
 }) {
   return <LiveMap {...props} />;
 }

@@ -87,9 +87,9 @@ export default function RoutesBrowser({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search routes..."
-        className="block w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-maroon focus:outline-none focus:ring-1 focus:ring-maroon dark:border-gray-700 dark:bg-gray-900"
+        className="block w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
       />
-      <ul className="mt-4 divide-y divide-gray-200 dark:divide-gray-800">
+      <ul className="mt-4 divide-y divide-gray-200">
         {filtered.map((r) => {
           const isFav = favorites.has(r.id);
           const isPending = pending.has(r.id);
@@ -110,7 +110,7 @@ export default function RoutesBrowser({
                     {r.has_live_bus && (
                       <>
                         <span>·</span>
-                        <span className="text-green-600 dark:text-green-400">
+                        <span className="text-green-600">
                           live
                         </span>
                       </>
@@ -125,8 +125,8 @@ export default function RoutesBrowser({
                 aria-pressed={isFav}
                 className={`ml-3 shrink-0 rounded px-3 py-1 text-sm font-medium transition ${
                   isFav
-                    ? "bg-maroon text-white hover:bg-maroon-700"
-                    : "border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+                    ? "bg-accent text-white hover:bg-accent-hover"
+                    : "border border-gray-300 text-gray-700 hover:bg-gray-50"
                 } ${isPending ? "opacity-60" : ""}`}
               >
                 {isFav ? "Favorited" : "Favorite"}

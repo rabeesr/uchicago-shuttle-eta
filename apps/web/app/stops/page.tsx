@@ -49,7 +49,7 @@ export default async function StopsPage() {
   const initialFavorites = (favs ?? []).map((f) => f.stop_id);
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
+    <main className="mx-auto max-w-6xl px-4 py-6">
       <h1 className="text-2xl font-bold">Browse stops</h1>
       <p className="mt-1 text-sm text-gray-500">
         {userId
