@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import LiveMapLoader from "@/components/LiveMapLoader";
@@ -9,6 +10,24 @@ import NearestStopOnRoute from "@/components/NearestStopOnRoute";
 import type { VehicleRow, RoutePolyline, StopMarker } from "@/components/LiveMap";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await getSupabaseServer();
+  const { data: route } = await supabase.from("routes").select("name").eq("id", id).maybeSingle();
+  const title = route?.name ? `${route.name} — Shuttle ETA` : "Shuttle ETA";
+  const description = "Live UChicago shuttle route with transparent ETAs per stop.";
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary", title, description },
+  };
+}
 
 export default async function RouteDetailPage({
   params,
