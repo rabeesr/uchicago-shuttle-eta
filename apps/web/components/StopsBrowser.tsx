@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useSupabaseBrowser } from "@/lib/supabase-browser";
@@ -139,10 +140,13 @@ export default function StopsBrowser({
           const isFav = favorites.has(s.id);
           const isPending = pending.has(s.id);
           return (
-            <li key={s.id} className="flex items-start justify-between py-3">
-              <div className="min-w-0">
-                <div className="font-medium">{s.name}</div>
-                <div className="mt-1 flex flex-wrap gap-1">
+            <li key={s.id} className="flex items-start justify-between gap-3 py-3">
+              <Link
+                href={`/stops/${s.id}`}
+                className="-mx-2 flex min-w-0 flex-1 flex-col gap-1 rounded-lg px-2 py-1 transition-colors hover:bg-gray-50"
+              >
+                <div className="font-medium hover:text-accent">{s.name}</div>
+                <div className="flex flex-wrap gap-1">
                   {s.routes.map((r) => (
                     <span
                       key={r.id}
@@ -153,19 +157,22 @@ export default function StopsBrowser({
                     </span>
                   ))}
                 </div>
-              </div>
+                <div className="text-[11px] text-gray-400">
+                  tap for upcoming arrivals →
+                </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => toggle(s.id)}
                 disabled={isPending}
                 aria-pressed={isFav}
-                className={`ml-3 shrink-0 rounded px-3 py-1 text-sm font-medium transition ${
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                   isFav
                     ? "bg-accent text-white hover:bg-accent-hover"
-                    : "border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                 } ${isPending ? "opacity-60" : ""}`}
               >
-                {isFav ? "Favorited" : "Favorite"}
+                {isFav ? "★ Favorited" : "☆ Favorite"}
               </button>
             </li>
           );

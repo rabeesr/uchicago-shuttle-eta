@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useSupabaseBrowser } from "@/lib/supabase-browser";
@@ -94,15 +95,18 @@ export default function RoutesBrowser({
           const isFav = favorites.has(r.id);
           const isPending = pending.has(r.id);
           return (
-            <li key={r.id} className="flex items-start justify-between py-3">
-              <div className="flex min-w-0 items-start gap-3">
+            <li key={r.id} className="flex items-start justify-between gap-3 py-3">
+              <Link
+                href={`/routes/${r.id}`}
+                className="-mx-2 flex min-w-0 flex-1 items-start gap-3 rounded-lg px-2 py-1 transition-colors hover:bg-gray-50"
+              >
                 <span
                   className="mt-1 inline-block h-3 w-3 shrink-0 rounded-full"
                   style={{ backgroundColor: r.color ?? "#666" }}
                   aria-hidden
                 />
                 <div className="min-w-0">
-                  <div className="font-medium">{r.name}</div>
+                  <div className="font-medium hover:text-accent">{r.name}</div>
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">
                     {r.short_name && <span>{r.short_name}</span>}
                     <span>·</span>
@@ -110,26 +114,27 @@ export default function RoutesBrowser({
                     {r.has_live_bus && (
                       <>
                         <span>·</span>
-                        <span className="text-green-600">
-                          live
-                        </span>
+                        <span className="text-green-600">live</span>
                       </>
                     )}
                   </div>
+                  <div className="mt-0.5 text-[11px] text-gray-400">
+                    tap for timetable + map →
+                  </div>
                 </div>
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => toggle(r.id)}
                 disabled={isPending}
                 aria-pressed={isFav}
-                className={`ml-3 shrink-0 rounded px-3 py-1 text-sm font-medium transition ${
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                   isFav
                     ? "bg-accent text-white hover:bg-accent-hover"
-                    : "border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                 } ${isPending ? "opacity-60" : ""}`}
               >
-                {isFav ? "Favorited" : "Favorite"}
+                {isFav ? "★ Favorited" : "☆ Favorite"}
               </button>
             </li>
           );

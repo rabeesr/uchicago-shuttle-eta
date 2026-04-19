@@ -41,13 +41,15 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
   const [rows, setRows] = useState<EtaByKey>(() =>
     Object.fromEntries(initial.map((r) => [makeKey(r), r])),
   );
-  const [now, setNow] = useState(() => Date.now());
+  // now=null during SSR + first client render so time-based content is
+  // identical on both sides. Flipped to a real clock after mount.
+  const [now, setNow] = useState<number | null>(null);
   const initialIndex = useRef<Map<string, InitialEta>>(
     new Map(initial.map((r) => [makeKey(r), r])),
   );
 
-  // Tick every second so countdowns update smoothly.
   useEffect(() => {
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
@@ -119,7 +121,11 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
       // Pick lowest live ETA per (route, stop).
       const candidates = list.map((r) => {
         const row = rows[makeKey(r)];
-        const age = secondsFromNow(row?.computed_at ?? r.computed_at);
+        // During SSR + first client render, `now === null` → pretend the data
+        // is brand new (age=0) so server and client agree exactly.
+        const age = now === null
+          ? 0
+          : (now - new Date(row?.computed_at ?? r.computed_at).getTime()) / 1000;
         const our = row?.our_eta_seconds ?? r.our_eta_seconds;
         const countdown = our == null ? null : Math.max(0, Math.round(our - age));
         return { ...r, row, countdown, age };
@@ -197,7 +203,9 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
               </div>
             </div>
             <div className="mt-3 text-[11px] text-gray-400">
-              updated {Math.max(0, Math.round(c.age))}s ago · tap for timetable
+              {now === null
+                ? "tap for timetable"
+                : `updated ${Math.max(0, Math.round(c.age))}s ago · tap for timetable`}
             </div>
           </a>
         );

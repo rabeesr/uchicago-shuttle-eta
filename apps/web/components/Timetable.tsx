@@ -50,9 +50,11 @@ export default function Timetable({
   const [rows, setRows] = useState<Record<string, Arrival>>(() =>
     Object.fromEntries(initial.map((a) => [a.key, a])),
   );
-  const [now, setNow] = useState(Date.now());
+  // null until mount so SSR and first client render match.
+  const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
@@ -124,7 +126,10 @@ export default function Timetable({
 
   const withLiveCountdown = useMemo(() => {
     return Object.values(rows).map((a) => {
-      const age = secondsFromNow(a.computed_at);
+      // Before mount, pretend age=0 so SSR and hydration match exactly.
+      const age = now === null
+        ? 0
+        : (now - new Date(a.computed_at).getTime()) / 1000;
       const countdown = a.our_eta_seconds == null
         ? null
         : Math.max(0, Math.round(a.our_eta_seconds - age));
