@@ -13,7 +13,7 @@ export default async function StopsPage() {
 
   const [{ data: stops }, { data: routeStops }, { data: routes }, { data: favs }] =
     await Promise.all([
-      supabase.from("stops").select("id, name"),
+      supabase.from("stops").select("id, name, lat, lon"),
       supabase.from("route_stops").select("route_id, stop_id"),
       supabase.from("routes").select("id, name, color"),
       userId
@@ -38,6 +38,8 @@ export default async function StopsPage() {
     .map((s) => ({
       id: s.id,
       name: s.name,
+      lat: s.lat,
+      lon: s.lon,
       routes: routesPerStop.get(s.id) ?? [],
     }))
     .sort((a, b) => a.name.localeCompare(b.name));

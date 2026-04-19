@@ -48,7 +48,7 @@ export default async function Home() {
 
   // Favorites (stops + routes), joined with their reference tables.
   const [{ data: favStops }, { data: favRoutes }] = await Promise.all([
-    supabase.from("user_favorite_stops").select("stop_id, stops(id, name)"),
+    supabase.from("user_favorite_stops").select("stop_id, stops(id, name, lat, lon)"),
     supabase.from("user_favorite_routes").select("route_id, routes(id, name, color)"),
   ]);
 
@@ -79,7 +79,7 @@ export default async function Home() {
   const { data: etas } = await supabase
     .from("stop_etas")
     .select(
-      "route_id, stop_id, vehicle_id, our_eta_seconds, passio_eta_seconds, computed_at, stops(name), routes(name, color)",
+      "route_id, stop_id, vehicle_id, our_eta_seconds, passio_eta_seconds, computed_at, stops(name, lat, lon), routes(name, color), vehicles(pax_load)",
     )
     .or(
       [
@@ -90,8 +90,9 @@ export default async function Home() {
         .join(","),
     );
 
-  type NestedStop = { name: string } | { name: string }[] | null;
+  type NestedStop = { name: string; lat: number; lon: number } | { name: string; lat: number; lon: number }[] | null;
   type NestedRoute = { name: string; color: string | null } | { name: string; color: string | null }[] | null;
+  type NestedVehicle = { pax_load: number | null } | { pax_load: number | null }[] | null;
   type JoinedRow = {
     route_id: string;
     stop_id: string;
@@ -101,6 +102,7 @@ export default async function Home() {
     computed_at: string;
     stops: NestedStop;
     routes: NestedRoute;
+    vehicles: NestedVehicle;
   };
 
   const pickOne = <T,>(v: T | T[] | null): T | null =>
@@ -114,6 +116,7 @@ export default async function Home() {
   ).map((r) => {
     const stop = pickOne(r.stops);
     const route = pickOne(r.routes);
+    const vehicle = pickOne(r.vehicles);
     const source: "stop" | "route" = favoriteStopSet.has(r.stop_id)
       ? "stop"
       : "route";
@@ -125,8 +128,11 @@ export default async function Home() {
       passio_eta_seconds: r.passio_eta_seconds,
       computed_at: r.computed_at,
       stop_name: stop?.name ?? "Unknown stop",
+      stop_lat: stop?.lat ?? null,
+      stop_lon: stop?.lon ?? null,
       route_name: route?.name ?? "Unknown route",
       route_color: route?.color ?? null,
+      pax_load: vehicle?.pax_load ?? null,
       source,
     };
   });
@@ -143,7 +149,9 @@ export default async function Home() {
   const stopPlaceholders: InitialEta[] = (favStops ?? [])
     .filter((f) => !stopRowsWithLive.has(f.stop_id))
     .map((f) => {
-      const stop = Array.isArray(f.stops) ? f.stops[0] : f.stops;
+      const stop = (Array.isArray(f.stops) ? f.stops[0] : f.stops) as
+        | { name: string; lat: number; lon: number }
+        | null;
       return {
         route_id: "-",
         stop_id: f.stop_id,
@@ -152,8 +160,11 @@ export default async function Home() {
         passio_eta_seconds: null,
         computed_at: new Date().toISOString(),
         stop_name: stop?.name ?? "Unknown stop",
+        stop_lat: stop?.lat ?? null,
+        stop_lon: stop?.lon ?? null,
         route_name: "No live bus",
         route_color: null,
+        pax_load: null,
         source: "stop" as const,
       };
     });
@@ -170,8 +181,11 @@ export default async function Home() {
         passio_eta_seconds: null,
         computed_at: new Date().toISOString(),
         stop_name: "(no stop — route not currently running)",
+        stop_lat: null,
+        stop_lon: null,
         route_name: route?.name ?? "Unknown route",
         route_color: route?.color ?? null,
+        pax_load: null,
         source: "route" as const,
       };
     });

@@ -148,7 +148,20 @@ export default async function StopDetailPage({
         )}
       </div>
 
-      <LeaveByChip stopLat={stop.lat} stopLon={stop.lon} className="mt-4" />
+      {(() => {
+        const soonest = arrivals
+          .filter((a) => a.our_eta_seconds != null)
+          .sort((a, b) => (a.our_eta_seconds ?? 1e9) - (b.our_eta_seconds ?? 1e9))[0];
+        return (
+          <LeaveByChip
+            stopLat={stop.lat}
+            stopLon={stop.lon}
+            nextArrivalSeconds={soonest?.our_eta_seconds ?? null}
+            nextArrivalComputedAt={soonest?.computed_at ?? null}
+            className="mt-4"
+          />
+        );
+      })()}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <section>

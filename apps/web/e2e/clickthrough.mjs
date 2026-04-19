@@ -32,6 +32,32 @@ function expect(ok, label) {
 }
 
 async function run() {
+  // 0) Directly to a known-active stop (Reynolds Club) and verify leave-by
+  {
+    const page = await ctx.newPage();
+    page.on("pageerror", (e) => errors.push(`pageerror /stops/8579: ${String(e).slice(0, 150)}`));
+    await page.goto(`${BASE}/stops/8579`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("text=Reynolds Club", { timeout: 10_000 });
+    await page.getByRole("button", { name: /Use my location/ }).click();
+    try {
+      await page.waitForSelector("text=/min walk/", { timeout: 5_000 });
+      expect(true, "walking-time chip renders on /stops/8579");
+    } catch {
+      expect(false, "walking-time chip missing on /stops/8579");
+    }
+    try {
+      await page.waitForSelector(
+        "text=/Leave (now|in \\d+m|by \\d)/i",
+        { timeout: 6_000 },
+      );
+      expect(true, "leave-by label renders on /stops/8579 with live arrivals");
+    } catch {
+      console.log("   (no live arrivals at Reynolds Club right now — check worker)");
+    }
+    await page.screenshot({ path: resolve(screenshotDir, "c00-reynolds-leave-by.png"), fullPage: true });
+    await page.close();
+  }
+
   // 1) /stops → click the first stop row → detail page
   {
     const page = await ctx.newPage();
@@ -58,6 +84,19 @@ async function run() {
       }
     } else {
       expect(false, "no 'Use my location' button found on stop detail");
+    }
+    // Leave-by feature: should appear next to the walking-time chip if
+    // there's a live arrival for this stop.
+    try {
+      await page.waitForSelector(
+        "text=/Leave (now|in \\d+m|by \\d)/i",
+        { timeout: 4_000 },
+      );
+      expect(true, "'Leave by' message appears alongside walking chip");
+    } catch {
+      // If the stop has no live arrivals right now, the leave-by won't render.
+      // That's expected behavior, not a failure — but note it in output.
+      console.log("   (no live arrivals at this stop → leave-by skipped)");
     }
     // Upcoming arrivals check
     const arrivalsText = await page.locator("h2", { hasText: "Upcoming arrivals" }).count();

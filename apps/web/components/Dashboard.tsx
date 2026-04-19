@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useSupabaseBrowser } from "@/lib/supabase-browser";
-import { formatCountdown, etaDisagreement } from "@/lib/format";
+import { formatCountdown, etaDisagreement, computeLeaveBy, formatLeaveBy } from "@/lib/format";
+import { useUserLocation } from "@/hooks/useUserLocation";
+import { haversineM, walkingSecondsM } from "@/lib/geo";
+import { crowdingFromPax, crowdingLabel, crowdingColorClass } from "@/lib/crowding";
 
 export interface InitialEta {
   route_id: string;
@@ -14,8 +17,11 @@ export interface InitialEta {
   computed_at: string;
   // denormalized display fields
   stop_name: string;
+  stop_lat: number | null;
+  stop_lon: number | null;
   route_name: string;
   route_color: string | null;
+  pax_load: number | null;
   // Which kind of favorite this card represents — governs the tap target.
   source?: "stop" | "route";
 }
@@ -38,6 +44,7 @@ function secondsFromNow(iso: string): number {
 
 export default function Dashboard({ initial }: { initial: InitialEta[] }) {
   const supabase = useSupabaseBrowser();
+  const { state: loc, request: requestLoc } = useUserLocation();
   const [rows, setRows] = useState<EtaByKey>(() =>
     Object.fromEntries(initial.map((r) => [makeKey(r), r])),
   );
@@ -153,8 +160,37 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
     );
   }
 
+  // Has the user granted location? If yes, extract it once for the card loop.
+  const userLatLon = loc.status === "granted"
+    ? { lat: loc.lat, lon: loc.lon }
+    : null;
+
+  // Only show the "Use my location" nudge if we have any stop-type card with
+  // coordinates available (route-only favorites don't benefit from it).
+  const anyStopCoord = cards.some(
+    (c) => c.source !== "route" && c.stop_lat != null && c.stop_lon != null,
+  );
+  const showLocPrompt =
+    anyStopCoord && (loc.status === "idle" || loc.status === "denied" || loc.status === "unsupported");
+
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <>
+      {showLocPrompt && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-accent-subtle bg-accent-subtle/40 p-4">
+          <div className="text-sm text-gray-700">
+            <span className="font-medium text-accent">Know exactly when to leave.</span>{" "}
+            Share your location and we&apos;ll show walking time + leave-by time for each stop.
+          </div>
+          <button
+            type="button"
+            onClick={requestLoc}
+            className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          >
+            📍 Use my location
+          </button>
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {cards.map((c) => {
         const row = c.row;
         const passio = row?.passio_eta_seconds ?? c.passio_eta_seconds;
@@ -175,6 +211,37 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
             : c.stop_id && c.stop_id !== "-"
               ? `/stops/${c.stop_id}`
               : `/routes/${c.route_id}`;
+
+        // Walking time + leave-by, computed per card if we have location + coords.
+        let walkMinutes: number | null = null;
+        let leaveByText = "";
+        if (userLatLon && c.stop_lat != null && c.stop_lon != null && now != null) {
+          const distM = haversineM(userLatLon, { lat: c.stop_lat, lon: c.stop_lon });
+          const walkSec = walkingSecondsM(distM);
+          walkMinutes = Math.max(1, Math.ceil(walkSec / 60));
+          const lb = computeLeaveBy(now, c.countdown, walkSec);
+          leaveByText = formatLeaveBy(lb);
+        }
+
+        // Clock-time the bus is arriving at this stop.
+        const busClockDisplay = c.countdown != null && now != null
+          ? new Date(now + c.countdown * 1000).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })
+          : null;
+        // Clock-time the user would arrive at the stop if they left now.
+        let arriveAtStopDisplay: string | null = null;
+        if (userLatLon && c.stop_lat != null && c.stop_lon != null && now != null) {
+          const distM = haversineM(userLatLon, { lat: c.stop_lat, lon: c.stop_lon });
+          const walkSec = walkingSecondsM(distM);
+          arriveAtStopDisplay = new Date(now + walkSec * 1000).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+        }
+        const crowd = crowdingFromPax(c.pax_load);
+
         return (
           <a
             key={makeKey(c)}
@@ -197,19 +264,62 @@ export default function Dashboard({ initial }: { initial: InitialEta[] }) {
                 <div className="text-3xl font-bold tabular-nums">
                   {formatCountdown(c.countdown)}
                 </div>
-                <div className={`mt-1 text-xs tabular-nums ${agreementClass}`}>
+                {busClockDisplay && (
+                  <div className="text-xs text-gray-500 tabular-nums">
+                    @ {busClockDisplay}
+                  </div>
+                )}
+                <div className={`mt-0.5 text-[11px] tabular-nums ${agreementClass}`}>
                   Passio: {formatCountdown(passioAdjusted)}
                 </div>
               </div>
             </div>
-            <div className="mt-3 text-[11px] text-gray-400">
-              {now === null
-                ? "tap for timetable"
-                : `updated ${Math.max(0, Math.round(c.age))}s ago · tap for timetable`}
+
+            {(walkMinutes != null || leaveByText || arriveAtStopDisplay) && (
+              <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+                {walkMinutes != null && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-center">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Walk</div>
+                    <div className="mt-0.5 font-semibold text-gray-900">~{walkMinutes}m</div>
+                  </div>
+                )}
+                {arriveAtStopDisplay && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-center">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">You arrive</div>
+                    <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">{arriveAtStopDisplay}</div>
+                  </div>
+                )}
+                {leaveByText && (
+                  <div className="rounded-lg border border-accent-subtle bg-accent-subtle/40 p-2 text-center">
+                    <div className="text-[10px] uppercase tracking-wide text-accent">
+                      {leaveByText.startsWith("🏃") ? "Too late" : "Leave"}
+                    </div>
+                    <div className="mt-0.5 font-semibold text-accent truncate">
+                      {leaveByText.replace(/^[^a-zA-Z0-9]+/, "")}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-3 flex items-center justify-between text-[11px] text-gray-500">
+              <span>
+                {crowd !== "unknown" ? (
+                  <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${crowdingColorClass(crowd)}`}>
+                    👥 {crowdingLabel(crowd)}
+                  </span>
+                ) : null}
+              </span>
+              <span className="text-gray-400">
+                {now === null
+                  ? "tap for timetable →"
+                  : `updated ${Math.max(0, Math.round(c.age))}s ago · tap →`}
+              </span>
             </div>
           </a>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }

@@ -1,13 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useSupabaseBrowser } from "@/lib/supabase-browser";
+import { useUserLocation } from "@/hooks/useUserLocation";
+import { haversineM, walkingSecondsM } from "@/lib/geo";
 
 export interface BrowseStop {
   id: string;
   name: string;
+  lat: number;
+  lon: number;
   routes: Array<{ id: string; name: string; color: string | null }>;
 }
 
@@ -30,12 +34,28 @@ export default function StopsBrowser({
 }) {
   const supabase = useSupabaseBrowser();
   const { userId } = useAuth();
+  const { state: loc, request: requestLoc } = useUserLocation();
   const [query, setQuery] = useState("");
   const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(
     () => new Set(initialFavorites),
   );
   const [pending, setPending] = useState<Set<string>>(new Set());
+  // Wall-clock tick after mount — keeps "arrive HH:MM" fresh without an SSR
+  // mismatch. null during SSR and first client render.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const userLatLon = loc.status === "granted"
+    ? { lat: loc.lat, lon: loc.lon }
+    : null;
+
+  const showLocPrompt =
+    loc.status === "idle" || loc.status === "denied" || loc.status === "unsupported";
 
   const filtered = useMemo(() => {
     let rows = stops;
@@ -52,6 +72,17 @@ export default function StopsBrowser({
     }
     return rows;
   }, [stops, query, routeFilter]);
+
+  // If we have the user's location, enrich + sort by distance (nearest first).
+  const enriched = useMemo(() => {
+    if (!userLatLon) return filtered.map((s) => ({ ...s, walkSec: null as number | null, distM: null as number | null }));
+    return filtered
+      .map((s) => {
+        const distM = haversineM(userLatLon, { lat: s.lat, lon: s.lon });
+        return { ...s, distM, walkSec: walkingSecondsM(distM) };
+      })
+      .sort((a, b) => (a.distM ?? 1e12) - (b.distM ?? 1e12));
+  }, [filtered, userLatLon]);
 
   async function toggle(stopId: string) {
     if (!signedIn || !userId) {
@@ -96,6 +127,21 @@ export default function StopsBrowser({
 
   return (
     <div>
+      {showLocPrompt && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-accent-subtle bg-accent-subtle/40 p-3">
+          <div className="text-xs text-gray-700">
+            <span className="font-medium text-accent">See walking time + arrival time</span>{" "}
+            for every stop by sharing your location.
+          </div>
+          <button
+            type="button"
+            onClick={requestLoc}
+            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+          >
+            📍 Use my location
+          </button>
+        </div>
+      )}
       <input
         type="search"
         value={query}
@@ -136,9 +182,20 @@ export default function StopsBrowser({
         ))}
       </div>
       <ul className="mt-4 divide-y divide-gray-200">
-        {filtered.map((s) => {
+        {enriched.map((s) => {
           const isFav = favorites.has(s.id);
           const isPending = pending.has(s.id);
+          // Build walking + arrival text. Kept empty during SSR (now === null).
+          let walkArriveText = "";
+          if (s.walkSec != null && now != null) {
+            const arriveAt = new Date(now + s.walkSec * 1000);
+            const minutes = Math.max(1, Math.ceil(s.walkSec / 60));
+            const arriveDisplay = arriveAt.toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            });
+            walkArriveText = `🚶 ~${minutes} min walk · arrive ${arriveDisplay}`;
+          }
           return (
             <li key={s.id} className="flex items-start justify-between gap-3 py-3">
               <Link
@@ -157,9 +214,15 @@ export default function StopsBrowser({
                     </span>
                   ))}
                 </div>
-                <div className="text-[11px] text-gray-400">
-                  tap for upcoming arrivals →
-                </div>
+                {walkArriveText ? (
+                  <div className="text-[11px] font-medium text-accent">
+                    {walkArriveText}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-gray-400">
+                    tap for upcoming arrivals →
+                  </div>
+                )}
               </Link>
               <button
                 type="button"
@@ -177,7 +240,7 @@ export default function StopsBrowser({
             </li>
           );
         })}
-        {filtered.length === 0 && (
+        {enriched.length === 0 && (
           <li className="py-6 text-sm text-gray-500">
             No stops match &ldquo;{query}&rdquo;.
           </li>
