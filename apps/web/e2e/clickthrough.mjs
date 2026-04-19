@@ -77,7 +77,7 @@ async function run() {
     if (await locBtn.count() > 0) {
       await locBtn.click();
       try {
-        await page.waitForSelector("text=/min walk/", { timeout: 5_000 });
+        await page.waitForSelector("text=/You arrive at stop/", { timeout: 5_000 });
         expect(true, "walking-time chip renders after granting location");
       } catch {
         expect(false, "walking-time chip did not appear after location grant");
