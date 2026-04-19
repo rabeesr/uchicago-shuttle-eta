@@ -92,6 +92,8 @@ export default async function StopDetailPage({
       route_name: r?.name ?? e.route_id,
       route_color: r?.color ?? null,
       stop_name: stop.name,
+      stop_lat: stop.lat,
+      stop_lon: stop.lon,
       our_eta_seconds: e.our_eta_seconds,
       passio_eta_seconds: e.passio_eta_seconds,
       computed_at: e.computed_at,
@@ -170,6 +172,10 @@ export default async function StopDetailPage({
             initial={arrivals}
             filter={{ stopId: id }}
             emptyMessage="No buses are approaching this stop right now."
+            stopsById={{ [id]: { name: stop.name, lat: stop.lat, lon: stop.lon } }}
+            routesById={Object.fromEntries(
+              servingRoutes.map((r) => [r.id, { name: r.name, color: r.color }]),
+            )}
           />
         </section>
 

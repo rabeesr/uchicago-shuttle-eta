@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useSupabaseBrowser, getSupabaseAnon } from "@/lib/supabase-browser";
 import { useAuth } from "@clerk/nextjs";
-import { formatCountdown, etaDisagreement } from "@/lib/format";
+import { formatCountdown, etaDisagreement, computeLeaveBy, formatLeaveBy } from "@/lib/format";
 import { crowdingFromPax, crowdingLabel, crowdingColorClass } from "@/lib/crowding";
+import { useUserLocation } from "@/hooks/useUserLocation";
+import { haversineM, walkingSecondsM } from "@/lib/geo";
 
 export interface Arrival {
   key: string;                 // `${route_id}:${stop_id}:${vehicle_id}`
@@ -15,6 +17,8 @@ export interface Arrival {
   route_name: string;
   route_color: string | null;
   stop_name: string;
+  stop_lat: number | null;
+  stop_lon: number | null;
   our_eta_seconds: number | null;
   passio_eta_seconds: number | null;
   computed_at: string;
@@ -27,6 +31,17 @@ export interface TimetableFilter {
   routeId?: string;
 }
 
+export interface StopInfo {
+  name: string;
+  lat: number;
+  lon: number;
+}
+
+export interface RouteInfo {
+  name: string;
+  color: string | null;
+}
+
 function secondsFromNow(iso: string): number {
   return (Date.now() - new Date(iso).getTime()) / 1000;
 }
@@ -36,16 +51,23 @@ export default function Timetable({
   filter,
   emptyMessage,
   groupBy = "none",
+  stopsById = {},
+  routesById = {},
 }: {
   initial: Arrival[];
   filter: TimetableFilter;
   emptyMessage: string;
   groupBy?: "none" | "stop";
+  /** Reference data so Realtime-pushed rows can be enriched with names/coords. */
+  stopsById?: Record<string, StopInfo>;
+  routesById?: Record<string, RouteInfo>;
 }) {
   const { isSignedIn } = useAuth();
   const supabase = useSupabaseBrowser();
   const anon = useMemo(() => getSupabaseAnon(), []);
   const realtimeClient = isSignedIn ? supabase : anon;
+  const { state: loc } = useUserLocation();
+  const userLatLon = loc.status === "granted" ? { lat: loc.lat, lon: loc.lon } : null;
 
   const [rows, setRows] = useState<Record<string, Arrival>>(() =>
     Object.fromEntries(initial.map((a) => [a.key, a])),
@@ -99,6 +121,8 @@ export default function Timetable({
           if (!n.route_id || !n.stop_id || !n.vehicle_id || !n.computed_at) return;
           const key = `${n.route_id}:${n.stop_id}:${n.vehicle_id}`;
           const seed = meta.get(key);
+          const stopInfo = stopsById[n.stop_id!];
+          const routeInfo = routesById[n.route_id!];
           setRows((prev) => ({
             ...prev,
             [key]: {
@@ -106,9 +130,11 @@ export default function Timetable({
               route_id: n.route_id!,
               stop_id: n.stop_id!,
               vehicle_id: n.vehicle_id!,
-              route_name: seed?.route_name ?? prev[key]?.route_name ?? n.route_id!,
-              route_color: seed?.route_color ?? prev[key]?.route_color ?? null,
-              stop_name: seed?.stop_name ?? prev[key]?.stop_name ?? n.stop_id!,
+              route_name: routeInfo?.name ?? seed?.route_name ?? prev[key]?.route_name ?? n.route_id!,
+              route_color: routeInfo?.color ?? seed?.route_color ?? prev[key]?.route_color ?? null,
+              stop_name: stopInfo?.name ?? seed?.stop_name ?? prev[key]?.stop_name ?? n.stop_id!,
+              stop_lat: stopInfo?.lat ?? prev[key]?.stop_lat ?? null,
+              stop_lon: stopInfo?.lon ?? prev[key]?.stop_lon ?? null,
               our_eta_seconds: n.our_eta_seconds ?? null,
               passio_eta_seconds: n.passio_eta_seconds ?? null,
               computed_at: n.computed_at!,
@@ -122,7 +148,7 @@ export default function Timetable({
     return () => {
       realtimeClient.removeChannel(channel);
     };
-  }, [realtimeClient, filter.stopId, filter.routeId, meta]);
+  }, [realtimeClient, filter.stopId, filter.routeId, meta, stopsById, routesById]);
 
   const withLiveCountdown = useMemo(() => {
     return Object.values(rows).map((a) => {
@@ -167,7 +193,7 @@ export default function Timetable({
             </div>
             <ul className="divide-y divide-gray-100">
               {arrivals.slice(0, 3).map((a) => (
-                <ArrivalRow key={a.key} a={a} showStop={false} showRoute={false} />
+                <ArrivalRow key={a.key} a={a} showStop={false} showRoute={false} userLatLon={userLatLon} nowMs={now} />
               ))}
             </ul>
           </div>
@@ -179,7 +205,7 @@ export default function Timetable({
   return (
     <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200">
       {sorted.map((a) => (
-        <ArrivalRow key={a.key} a={a} showStop showRoute />
+        <ArrivalRow key={a.key} a={a} showStop showRoute userLatLon={userLatLon} nowMs={now} />
       ))}
     </ul>
   );
@@ -189,10 +215,14 @@ function ArrivalRow({
   a,
   showStop,
   showRoute,
+  userLatLon,
+  nowMs,
 }: {
   a: Arrival & { age: number; countdown: number | null; passioLive: number | null };
   showStop: boolean;
   showRoute: boolean;
+  userLatLon: { lat: number; lon: number } | null;
+  nowMs: number | null;
 }) {
   const agreement = etaDisagreement(a.countdown, a.passioLive);
   const agreementClass =
@@ -204,6 +234,15 @@ function ArrivalRow({
           ? "text-red-600"
           : "text-gray-500";
   const crowd = crowdingFromPax(a.pax_load);
+
+  // Compute live leave-by if we have location + stop coords + a live clock.
+  let leaveByText = "";
+  if (userLatLon && a.stop_lat != null && a.stop_lon != null && nowMs != null && a.countdown != null) {
+    const distM = haversineM(userLatLon, { lat: a.stop_lat, lon: a.stop_lon });
+    const walkSec = walkingSecondsM(distM);
+    const lb = computeLeaveBy(nowMs, a.countdown, walkSec);
+    leaveByText = formatLeaveBy(lb);
+  }
 
   return (
     <li className="flex items-center justify-between gap-3 px-4 py-3">
@@ -220,10 +259,15 @@ function ArrivalRow({
           {showStop && <span className="truncate text-sm">{a.stop_name}</span>}
           <span className="text-[11px] text-gray-400">· bus {a.vehicle_id}</span>
         </div>
-        <div className="mt-1 flex items-center gap-2 text-[11px]">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
           {crowd !== "unknown" && (
             <span className={`inline-block rounded px-1.5 py-0.5 font-medium ${crowdingColorClass(crowd)}`}>
               {crowdingLabel(crowd)}
+            </span>
+          )}
+          {leaveByText && (
+            <span className="inline-block rounded bg-accent-subtle px-1.5 py-0.5 font-semibold text-accent">
+              {leaveByText}
             </span>
           )}
           <span className="text-gray-400">updated {Math.max(0, Math.round(a.age))}s ago</span>

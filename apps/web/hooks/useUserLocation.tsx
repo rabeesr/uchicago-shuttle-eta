@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 export type LocationState =
   | { status: "idle" }
@@ -16,8 +17,7 @@ function readCache(): LocationState | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as LocationState;
-    return parsed;
+    return JSON.parse(raw) as LocationState;
   } catch {
     return null;
   }
@@ -31,15 +31,14 @@ function writeCache(s: LocationState) {
   }
 }
 
-/**
- * Browser geolocation, session-scoped. Not persisted to Supabase; re-prompted
- * each tab session unless the browser caches the permission.
- *
- * Usage:
- *   const { state, request } = useUserLocation();
- *   if (state.status === 'granted') { ... state.lat ... }
- */
-export function useUserLocation() {
+interface LocationCtx {
+  state: LocationState;
+  request: () => void;
+}
+
+const Ctx = createContext<LocationCtx | null>(null);
+
+export function UserLocationProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<LocationState>({ status: "idle" });
 
   useEffect(() => {
@@ -76,5 +75,21 @@ export function useUserLocation() {
     );
   }, []);
 
-  return { state, request };
+  const value = useMemo(() => ({ state, request }), [state, request]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/**
+ * Browser geolocation, session-scoped, shared across all consumers via
+ * <UserLocationProvider/>. When one component requests and gets granted,
+ * every other component sees the same state instantly.
+ */
+export function useUserLocation() {
+  const v = useContext(Ctx);
+  if (!v) {
+    throw new Error(
+      "useUserLocation must be used inside <UserLocationProvider>. Add it to your root layout.",
+    );
+  }
+  return v;
 }

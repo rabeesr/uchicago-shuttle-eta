@@ -90,6 +90,7 @@ export default async function RouteDetailPage({
   }>).map((e) => {
     const v = pickOne(e.vehicles);
     const s = pickOne(e.stops);
+    const stopCoord = stopsById.get(e.stop_id);
     return {
       key: `${e.route_id}:${e.stop_id}:${e.vehicle_id}`,
       route_id: e.route_id,
@@ -98,6 +99,8 @@ export default async function RouteDetailPage({
       route_name: route.name,
       route_color: route.color,
       stop_name: s?.name ?? e.stop_id,
+      stop_lat: stopCoord?.lat ?? null,
+      stop_lon: stopCoord?.lon ?? null,
       our_eta_seconds: e.our_eta_seconds,
       passio_eta_seconds: e.passio_eta_seconds,
       computed_at: e.computed_at,
@@ -173,6 +176,10 @@ export default async function RouteDetailPage({
             filter={{ routeId: id }}
             emptyMessage="No live predictions right now — the route may not be running."
             groupBy="stop"
+            stopsById={Object.fromEntries(
+              stopMarkers.map((s) => [s.id, { name: s.name, lat: s.lat, lon: s.lon }]),
+            )}
+            routesById={{ [route.id]: { name: route.name, color: route.color } }}
           />
         </section>
 
